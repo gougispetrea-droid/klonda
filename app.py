@@ -1,81 +1,91 @@
 import streamlit as st
-import csv
+import pandas as pd
 from openai import OpenAI
 from datetime import datetime
-import os
 
-# ================= 1. 网页全局设置 =================
-st.set_page_config(page_title="科隆达 - 内容矩阵引擎", page_icon="💡", layout="centered")
+st.set_page_config(page_title="科隆达 - 批量矩阵引擎", page_icon="🚀", layout="centered")
 
-st.title("💡 教室灯新媒体矩阵生成器")
-st.write("只需输入产品卖点，一键生成适配【抖音、小红书、视频号】的 B 端高转化业务脚本，并支持导出表格。")
+st.title("🚀 科隆达批量内容矩阵生成器")
+st.write("上传包含产品参数的表格，一键为您全线产品批量生成【抖音、小红书、视频号】的营销脚本！")
 
-# ================= 2. 侧边栏：系统配置区 =================
 st.sidebar.header("⚙️ 底层引擎配置")
-st.sidebar.write("首次使用请配置大模型接口。")
-api_key = st.sidebar.text_input("请输入你的 DeepSeek API 密钥", type="password")
-
-# ================= 3. 主界面：用户操作区 =================
-st.subheader("📦 核心产品信息")
-product_info = st.text_area(
-    "在这里输入或修改产品卖点：", 
-    value="专业护眼教室灯。核心卖点：资质证书齐全，包过验收，验收报告齐全。"
-)
+api_key = st.sidebar.text_input("请输入您的 DeepSeek 官方 API Key", type="password")
 
 platforms = {
-    "抖音": "受众是刷短视频的工程商和集成商。前3秒犀利痛点留人，强调包过验收，引导私信。",
-    "小红书": "受众是私立学校决策者。采用避坑指南形式，展示厚厚的资质证书，打造靠谱专业感。",
-    "微信视频号": "受众是校长、教育局干事。语气稳重专业，强调项目合规性、零风险交付。"
+    "抖音": "受众是刷短视频的工程商或家长。前3秒犀利痛点留人，强调核心优势和背书，引导私信。",
+    "小红书": "受众是决策者或年轻人。采用避坑指南形式，展示硬核参数和证书，打造靠谱专业感。",
+    "微信视频号": "受众是朋友圈的校长、教育局干事及同行。语气稳重专业，强调项目合规、零风险交付。"
 }
 
-# ================= 4. 核心执行逻辑 =================
-if st.button("🚀 一键生成多平台脚本", use_container_width=True):
-    
+st.subheader("📁 第一步：上传产品表格")
+# 新增的上传文件组件
+uploaded_file = st.file_uploader("支持 .xlsx 或 .csv 格式", type=["xlsx", "csv"])
+st.markdown("*(💡 提示：请确保您的表格中包含两列：一列叫 **`产品名称`**，一列叫 **`产品卖点`**)*")
+
+if st.button("⚡ 启动全自动批量生成", use_container_width=True):
     if not api_key:
-        st.warning("⚠️ 别急，请先在左侧边栏输入你的 DeepSeek API 密钥！")
+        st.warning("⚠️ 请先在左侧边栏输入 API Key！")
+    elif uploaded_file is None:
+        st.warning("⚠️ 请先上传要处理的表格文件！")
     else:
-        with st.spinner("AI 正在深度思考，疯狂撰写矩阵内容中..."):
-            try:
-                client = OpenAI(
-                    base_url="https://api.deepseek.com/v1",
-                    api_key=api_key
+        try:
+            # 自动识别并读取表格
+            if uploaded_file.name.endswith('.csv'):
+                df = pd.read_csv(uploaded_file)
+            else:
+                df = pd.read_excel(uploaded_file)
+            
+            if "产品卖点" not in df.columns or "产品名称" not in df.columns:
+                st.error("❌ 表格格式不对哦！请确保表头有【产品名称】和【产品卖点】这两列。")
+            else:
+                client = OpenAI(base_url="https://api.deepseek.com", api_key=api_key)
+                results = []
+                
+                # 画一个进度条，让等待过程不枯燥
+                progress_bar = st.progress(0)
+                total_rows = len(df)
+                st.info(f"成功读取 {total_rows} 款产品，AI 正在批量疯狂撰写中，请稍候...")
+                
+                # 核心大循环：逐行读取 Excel，逐个平台生成
+                for index, row in df.iterrows():
+                    product_name = row["产品名称"]
+                    product_info = row["产品卖点"]
+                    
+                    for platform, style in platforms.items():
+                        response = client.chat.completions.create(
+                            model="deepseek-chat", # 批量生成建议用此模型，速度极快且成本极低
+                            messages=[
+                                {"role": "system", "content": f"你是一个资深教育照明行业新媒体营销专家。当前平台：{platform}。风格：{style}"},
+                                {"role": "user", "content": f"请为我们的产品写一篇高转化脚本。产品名称：{product_name}。核心卖点/信息：{product_info}。直击客户痛点。"}
+                            ]
+                        )
+                        content = response.choices[0].message.content
+                        current_time = datetime.now().strftime("%Y-%m-%d %H:%M")
+                        
+                        # 把结果打包进字典
+                        results.append({
+                            "产品名称": product_name,
+                            "原始卖点": product_info,
+                            "分发平台": platform,
+                            "生成时间": current_time,
+                            "生成脚本内容": content
+                        })
+                    
+                    # 每跑完一款产品，进度条往前走一点
+                    progress_bar.progress((index + 1) / total_rows)
+                
+                # 把最终结果转成 Excel 可读的数据结构
+                result_df = pd.DataFrame(results)
+                st.success("✅ 震撼！所有产品的矩阵脚本已全部批量生成完毕！")
+                
+                # 提供下载按钮
+                csv_data = result_df.to_csv(index=False, encoding='utf-8-sig')
+                st.download_button(
+                    label="📥 点击下载【批量矩阵结果总表】",
+                    data=csv_data,
+                    file_name="科隆达_全线产品内容矩阵.csv",
+                    mime="text/csv"
                 )
-                
-                script_data = []
-                tabs = st.tabs(list(platforms.keys()))
-                
-                for index, (platform, style) in enumerate(platforms.items()):
-                    response = client.chat.completions.create(
-                        model="deepseek-v4-pro",
-                        messages=[
-                            {"role": "system", "content": f"你是一个资深教育照明行业的 B 端新媒体营销专家。当前平台：{platform}。风格要求：{style}"},
-                            {"role": "user", "content": f"请为我们的产品写一篇高转化脚本。产品信息：{product_info}。切忌写成C端卖货文案，直击工程验收痛点。"}
-                        ]
-                    )
-                    
-                    content = response.choices[0].message.content
-                    current_time = datetime.now().strftime("%Y-%m-%d %H:%M")
-                    script_data.append([platform, current_time, content])
-                    
-                    with tabs[index]:
-                        st.markdown(content)
-                
-                # ================= 5. 生成 CSV 并提供下载 =================
-                filename = "教室灯_B端矩阵.csv"
-                with open(filename, mode='w', encoding='utf-8-sig', newline='') as file:
-                    writer = csv.writer(file)
-                    writer.writerow(["分发平台", "生成时间", "脚本内容"])
-                    writer.writerows(script_data)
-                
-                st.success("✅ 矩阵脚本全部生成完毕！")
-                
-                with open(filename, "rb") as file:
-                    st.download_button(
-                        label="📥 点击下载 Excel 表格",
-                        data=file,
-                        file_name=filename,
-                        mime="text/csv"
-                    )
-                    
-            except Exception as e:
-                st.error(f"❌ 哎呀，连接似乎出了点小问题：{e}")
+
+        except Exception as e:
+            st.error(f"❌ 处理过程中出现小错误：{e}")
